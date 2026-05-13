@@ -9,5 +9,6 @@
       ]
     }
   },
-  "forwardPorts": [8080]
+  "forwardPorts": [8080],
+  "postCreateCommand": "cd /sdks/flutter && git remote remove origin && git remote add origin github.com && git fetch origin stable --depth=1 && git reset --hard origin/stable && rm -rf bin/cache && flutter channel stable"
 }
