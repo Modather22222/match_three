@@ -10,5 +10,5 @@
     }
   },
   "forwardPorts": [8080],
-  "postCreateCommand": "cd /sdks/flutter && git remote remove origin && git remote add origin github.com && git fetch origin stable --depth=1 && git reset --hard origin/stable && rm -rf bin/cache && flutter channel stable"
+  "postCreateCommand": "cd /sdks/flutter && git remote remove origin && git remote add origin github.com && git fetch origin stable --depth=1 && git reset --hard origin/stable && rm -rf bin/cache && flutter channel stable && cd /workspaces/Flutter_Game && sudo apt update && sudo apt install -y wget curl && wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb && sudo apt install ./google-chrome-stable_current_amd64.deb && rm google-chrome-stable_current_amd64.deb"
 }
