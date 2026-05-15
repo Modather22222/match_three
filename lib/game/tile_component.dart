@@ -1,5 +1,5 @@
 // =============================================================================
-// TILE COMPONENT (Flame)
+// TILE COMPONENT (Flame) — Restored original + fix
 // =============================================================================
 
 import 'dart:math' as math;
@@ -12,7 +12,7 @@ import 'package:flutter_game/models/tile_model.dart';
 
 /// A Flame PositionComponent that renders a single tile on the board.
 class TileComponent extends PositionComponent {
-  final TileModel model;
+  TileModel model;
 
   TileState state = TileState.idle;
   double animProgress = 0.0;
@@ -99,31 +99,30 @@ class TileComponent extends PositionComponent {
     _drawTextCentered(canvas, _symbol, center, Color.fromRGBO(255, 255, 255, 0.887 * o), size.x * 0.36);
 
     // 7. Special overlays
-    _renderSpecial(canvas, rect, center);
+    _renderSpecial(canvas, rect, center, o);
 
     canvas.restore();
   }
 
-  void _renderSpecial(Canvas canvas, Rect rect, Vector2 center) {
-    final double o = tileOpacity;
+  void _renderSpecial(Canvas canvas, Rect rect, Vector2 center, double opacity) {
     switch (model.specialType) {
       case SpecialType.stripedH:
         final midY = size.y / 2;
         canvas
-          ..drawLine(Offset(0, midY), Offset(size.x, midY), Paint()..color = Color.fromRGBO(255, 255, 255, 0.855 * o)..strokeWidth = 3)
-          ..drawLine(Offset(0, midY - 8), Offset(size.x, midY - 8), Paint()..color = Color.fromRGBO(255, 255, 255, 0.4 * o)..strokeWidth = 1.5)
-          ..drawLine(Offset(0, midY + 8), Offset(size.x, midY + 8), Paint()..color = Color.fromRGBO(255, 255, 255, 0.4 * o)..strokeWidth = 1.5);
+          ..drawLine(Offset(0, midY), Offset(size.x, midY), Paint()..color = Color.fromRGBO(255, 255, 255, 0.855 * opacity)..strokeWidth = 3)
+          ..drawLine(Offset(0, midY - 8), Offset(size.x, midY - 8), Paint()..color = Color.fromRGBO(255, 255, 255, 0.4 * opacity)..strokeWidth = 1.5)
+          ..drawLine(Offset(0, midY + 8), Offset(size.x, midY + 8), Paint()..color = Color.fromRGBO(255, 255, 255, 0.4 * opacity)..strokeWidth = 1.5);
         break;
       case SpecialType.stripedV:
         final midX = size.x / 2;
         canvas
-          ..drawLine(Offset(midX, 0), Offset(midX, size.y), Paint()..color = Color.fromRGBO(255, 255, 255, 0.855 * o)..strokeWidth = 3)
-          ..drawLine(Offset(midX - 8, 0), Offset(midX - 8, size.y), Paint()..color = Color.fromRGBO(255, 255, 255, 0.4 * o)..strokeWidth = 1.5)
-          ..drawLine(Offset(midX + 8, 0), Offset(midX + 8, size.y), Paint()..color = Color.fromRGBO(255, 255, 255, 0.4 * o)..strokeWidth = 1.5);
+          ..drawLine(Offset(midX, 0), Offset(midX, size.y), Paint()..color = Color.fromRGBO(255, 255, 255, 0.855 * opacity)..strokeWidth = 3)
+          ..drawLine(Offset(midX - 8, 0), Offset(midX - 8, size.y), Paint()..color = Color.fromRGBO(255, 255, 255, 0.4 * opacity)..strokeWidth = 1.5)
+          ..drawLine(Offset(midX + 8, 0), Offset(midX + 8, size.y), Paint()..color = Color.fromRGBO(255, 255, 255, 0.4 * opacity)..strokeWidth = 1.5);
         break;
       case SpecialType.wrapped:
-        canvas.drawRRect(RRect.fromRectAndRadius(rect.deflate(2), const Radius.circular(5)), Paint()..color = Color.fromRGBO(255, 255, 255, 0.451 * o)..style = PaintingStyle.stroke..strokeWidth = 3);
-        final cp = Paint()..color = Color.fromRGBO(255, 255, 255, 0.749 * o);
+        canvas.drawRRect(RRect.fromRectAndRadius(rect.deflate(2), const Radius.circular(5)), Paint()..color = Color.fromRGBO(255, 255, 255, 0.451 * opacity)..style = PaintingStyle.stroke..strokeWidth = 3);
+        final cp = Paint()..color = Color.fromRGBO(255, 255, 255, 0.749 * opacity);
         const cs = 7.0;
         canvas
           ..drawRect(Rect.fromLTWH(0, 0, cs, cs), cp)
@@ -135,14 +134,14 @@ class TileComponent extends PositionComponent {
         final hue = (animProgress * 0.25) % 1.0;
         final hsl = HSLColor.fromAHSL(1.0, hue * 360, 1.0, 0.5);
         canvas
-          ..drawRRect(RRect.fromRectAndRadius(rect.deflate(3), const Radius.circular(5)), Paint()..color = hsl.toColor().withValues(alpha: o))
-          ..drawRRect(RRect.fromRectAndRadius(rect.deflate(1), const Radius.circular(4)), Paint()..color = Color.fromRGBO(255, 255, 255, 0.502 * o)..style = PaintingStyle.stroke..strokeWidth = 2);
+          ..drawRRect(RRect.fromRectAndRadius(rect.deflate(3), const Radius.circular(5)), Paint()..color = hsl.toColor().withValues(alpha: opacity))
+          ..drawRRect(RRect.fromRectAndRadius(rect.deflate(1), const Radius.circular(4)), Paint()..color = Color.fromRGBO(255, 255, 255, 0.502 * opacity)..style = PaintingStyle.stroke..strokeWidth = 2);
         final orbitRadius = size.x * 0.28;
         for (var i = 0; i < 5; i++) {
           final angle = animProgress * 2 + i * (2 * math.pi / 5);
-          canvas.drawCircle(Offset(center.x + orbitRadius * math.cos(angle), center.y + orbitRadius * math.sin(angle)), 3, Paint()..color = _tileColor.lighten(0.5).withValues(alpha: o));
+          canvas.drawCircle(Offset(center.x + orbitRadius * math.cos(angle), center.y + orbitRadius * math.sin(angle)), 3, Paint()..color = _tileColor.lighten(0.5).withValues(alpha: opacity));
         }
-        _drawTextCentered(canvas, '✦', center, Color.fromRGBO(255, 255, 255, 1.0 * o), size.x * 0.36);
+        _drawTextCentered(canvas, '✦', center, Color.fromRGBO(255, 255, 255, 1.0 * opacity), size.x * 0.36);
         break;
       default:
         break;

@@ -1,5 +1,5 @@
 // =============================================================================
-// GAME SCREEN (Full Reactive — Final Version)
+// GAME SCREEN (Fixed — tiles now render)
 // =============================================================================
 
 import 'package:flutter/material.dart';
@@ -34,6 +34,7 @@ class _GameScreenState extends ConsumerState<GameScreen> {
   int shuffleStock = 0;
   int extraMovesStock = 0;
   int starsEarned = 0;
+  bool _gameReady = false;
 
   HammerModeOverlay? _hammerOverlay;
 
@@ -41,7 +42,6 @@ class _GameScreenState extends ConsumerState<GameScreen> {
   void initState() {
     super.initState();
     game = MatchGame(currentLevel: widget.level);
-    game.loadLevel(widget.level);
 
     game
       ..onScoreChanged = (score, target) {
@@ -57,8 +57,15 @@ class _GameScreenState extends ConsumerState<GameScreen> {
 
     AnalyticsService.instance.levelStart(widget.level);
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _checkDailyReward();
+    // Load level after Flame's onLoad completes
+    game.onLoadCompletedFuture.then((_) {
+      if (mounted) {
+        game.loadLevel(widget.level);
+        _checkDailyReward();
+        setState(() {
+          _gameReady = true;
+        });
+      }
     });
   }
 
@@ -106,19 +113,25 @@ class _GameScreenState extends ConsumerState<GameScreen> {
     }
   }
 
-  void _claimDailyReward() {
-    final saveService = ref.read(saveServiceProvider);
-    final today = DateTime.now().toIso8601String().substring(0, 10);
-    saveService.lastDaily = today;
-    saveService.addLives(1);
-    saveService.earnCoins(100);
-    AnalyticsService.instance.logEvent('daily_reward_claimed');
-
-    ref.read(saveDataProvider.notifier).reload();
-
-    setState(() {
-      showDailyReward = false;
-    });
+  void _claimDailyReward() async {
+    try {
+      final saveService = ref.read(saveServiceProvider);
+      final today = DateTime.now().toIso8601String().substring(0, 10);
+      saveService.lastDaily = today;
+      saveService.addLives(1);
+      saveService.earnCoins(100);
+      await saveService.flushNow();
+      AnalyticsService.instance.logEvent('daily_reward_claimed');
+      ref.read(saveDataProvider.notifier).reload();
+    } catch (e) {
+      debugPrint('Daily reward error: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          showDailyReward = false;
+        });
+      }
+    }
   }
 
   void _showRewardedAd() {
@@ -224,7 +237,7 @@ class _GameScreenState extends ConsumerState<GameScreen> {
 
           HUDOverlay(
             score: gameState.score,
-            targetScore: gameState.targetScore,
+            targetScore: game.currentTargetScore,
             movesRemaining: gameState.movesRemaining,
             coins: gameState.coins,
             level: gameState.currentLevel,
@@ -249,7 +262,7 @@ class _GameScreenState extends ConsumerState<GameScreen> {
           if (showWinPopup)
             PopupWidget(
               title: 'LEVEL COMPLETE!',
-              message: '⭐ $starsEarned Stars\nScore: $gameState.score / $gameState.targetScore',
+              message: '⭐ $starsEarned Stars\nScore: ${gameState.score} / ${game.currentTargetScore}',
               buttons: const ['RETRY', 'NEXT LEVEL', 'MENU'],
               onButtonPressed: (index) {
                 setState(() {
@@ -277,7 +290,7 @@ class _GameScreenState extends ConsumerState<GameScreen> {
           if (showLosePopup)
             PopupWidget(
               title: 'OUT OF MOVES',
-              message: 'Score: ${gameState.score} / ${gameState.targetScore}',
+              message: 'Score: ${gameState.score} / ${game.currentTargetScore}',
               buttons: extraMovesStock > 0
                   ? ['WATCH AD +5', 'RETRY', 'MENU']
                   : ['RETRY', 'MENU'],
@@ -307,6 +320,15 @@ class _GameScreenState extends ConsumerState<GameScreen> {
             ),
 
           if (showDailyReward) _buildDailyRewardPopup(),
+
+          // Show loading indicator until game is ready
+          if (!_gameReady)
+            Container(
+              color: const Color(0xFF0A0A14),
+              child: const Center(
+                child: CircularProgressIndicator(color: Color(0xFFF0C040)),
+              ),
+            ),
         ],
       ),
     );

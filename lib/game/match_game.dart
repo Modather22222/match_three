@@ -21,7 +21,6 @@ import 'package:flutter_game/game/tile_component.dart';
 import 'package:flutter_game/game/background_component.dart';
 import 'package:flutter_game/game/board_component.dart';
 
-/// Callback type for game events
 typedef ScoreCallback = void Function(int score, int target);
 typedef GameOverCallback = void Function(bool won, int score);
 typedef ComboCallback = void Function(int combo, int score);
@@ -42,11 +41,17 @@ class MatchGame extends FlameGame {
   int currentLevel = 1;
   bool processing = false;
   bool _boardEntered = false;
+  bool _onLoadCompleted = false;
+  int? _pendingLevel;
 
-  // Callbacks — wired by GameScreen
+  final _loadCompleter = Completer<void>();
+  Future<void> get onLoadCompletedFuture => _loadCompleter.future;
+
   ScoreCallback? onScoreChanged;
   GameOverCallback? onGameOver;
   ComboCallback? onCombo;
+
+  int _targetScore = 300;
 
   MatchGame({
     this.score = 0,
@@ -56,14 +61,15 @@ class MatchGame extends FlameGame {
   });
 
   int get stars {
-    final target = currentTargetScore;
-    if (target == 0) return 0;
-    final ratio = score / target;
+    if (_targetScore == 0) return 0;
+    final ratio = score / _targetScore;
     if (ratio < 1.0) return 0;
     if (ratio < 1.5) return 1;
     if (ratio < 2.0) return 2;
     return 3;
   }
+
+  int get targetScore => _targetScore;
 
   @override
   Future<void> onLoad() async {
@@ -88,16 +94,70 @@ class MatchGame extends FlameGame {
     world.add(backgroundComponent);
     world.add(boardComponent);
 
-    board.generateBoard();
-    assert(!matchFinder.findMatches().hasMatches, 'Board has initial matches!');
+    if (_pendingLevel != null) {
+      _applyLevel(_pendingLevel!);
+      _pendingLevel = null;
+    } else {
+      board.generateBoard();
+      assert(!matchFinder.findMatches().hasMatches, 'Board has initial matches!');
+    }
 
+    _spawnTileComponents();
     _animateBoardEntrance();
+    _notifyScoreChanged();
+    _onLoadCompleted = true;
+    _loadCompleter.complete();
   }
 
   int _numTypesForLevel(int level) =>
       level <= 2 ? numTileTypesTutorial : numTileTypesFull;
 
-  // ──── Board Entrance Animation ────
+  void _applyLevel(int levelNumber) {
+    currentLevel = levelNumber;
+    movesRemaining = (30 - (levelNumber - 1)).clamp(15, 30);
+    _targetScore = 300 + (levelNumber - 1) * 200;
+    score = 0;
+    coins = 0;
+    board.numTileTypes = levelNumber <= 2 ? 4 : 5;
+    board.generateBoard();
+    cascadeProcessor.reset();
+  }
+
+  void _spawnTileComponents() {
+    _clearTileComponents();
+    for (int c = 0; c < boardCols; c++) {
+      for (int r = 0; r < boardRows; r++) {
+        final tile = board.getTile(c, r);
+        if (tile != null) {
+          final position = board.gridToWorld(c, r);
+          final tileComp = TileComponent(
+            model: tile,
+            position: Vector2(position.x, position.y),
+            size: Vector2(tileSize.toDouble(), tileSize.toDouble()),
+          );
+          tileComp.tileOpacity = 0.0;
+          tileComp.add(
+            OpacityEffect.to(
+              1.0,
+              EffectController(duration: 0.3),
+            ),
+          );
+          world.add(tileComp);
+        }
+      }
+    }
+  }
+
+  void _clearTileComponents() {
+    for (final child in world.children.whereType<TileComponent>().toList()) {
+      child.removeFromParent();
+    }
+  }
+
+  void _refreshTileComponents() {
+    _clearTileComponents();
+    _spawnTileComponents();
+  }
 
   void _animateBoardEntrance() {
     _boardEntered = false;
@@ -116,22 +176,14 @@ class MatchGame extends FlameGame {
 
     for (var i = 0; i < tileComponents.length; i++) {
       final comp = tileComponents[i];
-      comp.tileOpacity = 0;
       final delay = animBoardEntry * (i / tileComponents.length) * 0.5;
       Future.delayed(Duration(milliseconds: (delay * 1000).round()), () {
         if (comp.isMounted) {
           comp.add(
             SequenceEffect([
-              OpacityEffect.to(
-                1.0,
-                EffectController(duration: animBoardEntry * 0.5),
-              ),
               ScaleEffect.by(
                 Vector2(0.7, 0.7),
-                EffectController(
-                  duration: animBoardEntry * 0.5,
-                  curve: Curves.easeOutBack,
-                ),
+                EffectController(duration: animBoardEntry * 0.5, curve: Curves.easeOutBack),
               ),
             ]),
           );
@@ -139,13 +191,10 @@ class MatchGame extends FlameGame {
       });
     }
 
-    Future.delayed(Duration(milliseconds: (animBoardEntry * 1000).round() + 200),
-        () {
+    Future.delayed(Duration(milliseconds: (animBoardEntry * 1000).round() + 200), () {
       _boardEntered = true;
     });
   }
-
-  // ──── Input handling ────
 
   Vector2? handlePointerDown(double worldX, double worldY) {
     final result = inputHandler.onPointerDown(worldX, worldY);
@@ -161,13 +210,8 @@ class MatchGame extends FlameGame {
     return inputHandler.onPointerUp(worldX, worldY);
   }
 
-  void setHammerMode(bool enabled) {
-    inputHandler.hammerMode = enabled;
-  }
-
+  void setHammerMode(bool enabled) => inputHandler.hammerMode = enabled;
   bool get hammerMode => inputHandler.hammerMode;
-
-  // ──── Swap Execution ────
 
   Future<SwapResult?> executeSwap(int col1, int row1, int col2, int row2) async {
     if (processing || !_boardEntered) return null;
@@ -183,14 +227,17 @@ class MatchGame extends FlameGame {
 
     if (!matchInfo.hasMatches && !isBombSwap) {
       board.performSwap(col1, row1, col2, row2);
+      _refreshTileComponents();
       return SwapResult.failed('no match');
     }
 
-    _consumeMove();
+    movesRemaining--;
     processing = true;
     inputHandler.isProcessing = true;
 
     await _processCascadeWithDelay();
+
+    _refreshTileComponents();
 
     processing = false;
     inputHandler.isProcessing = false;
@@ -208,10 +255,8 @@ class MatchGame extends FlameGame {
       score += step.scoreEarned;
       coins += step.coinsEarned;
       onCombo?.call(step.combo, step.scoreEarned);
-
-      // Spawn score popup at board center for each combo step
+      _refreshTileComponents();
       _spawnScorePopup(step);
-
       await Future.delayed(Duration(
         milliseconds: (stepDelay + animClear * 1000).round(),
       ));
@@ -224,63 +269,43 @@ class MatchGame extends FlameGame {
     final centerY = boardOffsetY + (boardRows * tileSize) / 2;
 
     if (step.combo >= 2) {
-      final comboText = 'COMBO x${step.combo}!';
       world.add(ComboPopupComponent(
         position: Vector2(centerX, centerY),
-        text: comboText,
+        text: 'COMBO x${step.combo}!',
       ));
     }
 
-    // Always show score popup for the earned points
-    final scoreText = step.combo <= 1 ? '+${step.scoreEarned}' : '+${step.scoreEarned}';
     world.add(ScorePopupComponent(
       position: Vector2(centerX, centerY + 30),
-      text: scoreText,
+      text: '+${step.scoreEarned}',
       baseFontSize: scorePopupBaseSize + scorePopupComboIncrement * (step.combo - 1),
     ));
   }
 
-  void _consumeMove() {
-    movesRemaining--;
-  }
-
-  void _notifyScoreChanged() {
-    onScoreChanged?.call(score, currentTargetScore);
-  }
+  void _consumeMove() => movesRemaining--;
+  void _notifyScoreChanged() => onScoreChanged?.call(score, targetScore);
 
   void _checkGameOver() {
-    final target = currentTargetScore;
-    if (score >= target) {
+    if (score >= _targetScore) {
       _onLevelCompleted();
     } else if (movesRemaining <= 0) {
       _onLevelFailed();
     }
   }
 
-  void _onLevelCompleted() {
-    onGameOver?.call(true, score);
-  }
-
-  void _onLevelFailed() {
-    onGameOver?.call(false, score);
-  }
-
-  int get currentTargetScore => 300 + (currentLevel - 1) * 200;
+  void _onLevelCompleted() => onGameOver?.call(true, score);
+  void _onLevelFailed() => onGameOver?.call(false, score);
 
   void loadLevel(int levelNumber) {
-    currentLevel = levelNumber;
-    movesRemaining = (30 - (levelNumber - 1)).clamp(15, 30);
-    score = 0;
-    coins = 0;
-    board.numTileTypes = levelNumber <= 2 ? 4 : 5;
-    board.generateBoard();
-    cascadeProcessor.reset();
-    _boardEntered = false;
+    if (!_onLoadCompleted) {
+      _pendingLevel = levelNumber;
+      return;
+    }
+    _applyLevel(levelNumber);
+    _spawnTileComponents();
     _animateBoardEntrance();
     _notifyScoreChanged();
   }
-
-  // ──── Power-ups ────
 
   void activateHammer(int col, int row) {
     if (board.isInBounds(col, row)) {
@@ -290,6 +315,7 @@ class MatchGame extends FlameGame {
         cascadeProcessor.totalScore += basePoints * 2;
         cascadeProcessor.totalCoins += 2;
       }
+      _refreshTileComponents();
       cascadeProcessor.runCascade();
       score += cascadeProcessor.totalScore;
       coins += cascadeProcessor.totalCoins;
@@ -318,51 +344,47 @@ class MatchGame extends FlameGame {
     types.shuffle(rng);
 
     for (var i = 0; i < originalTiles.length; i++) {
-      final pos = positions[i];
-      board.setTile(
-        pos.x.toInt(),
-        pos.y.toInt(),
-        originalTiles[i].copyWith(tileType: types[i]),
-      );
+      board.setTile(positions[i].x.toInt(), positions[i].y.toInt(),
+          originalTiles[i].copyWith(tileType: types[i]));
     }
 
     int attempts = 0;
     while (matchFinder.findMatches().hasMatches && attempts < 50) {
       final matchInfo = matchFinder.findMatches();
       for (final pos in matchInfo.clearPositions) {
-        final c = pos.x.toInt();
-        final r = pos.y.toInt();
-        board.setTile(c, r, TileModel(
-          tileType: rng.nextInt(board.numTileTypes),
-          gridCol: c,
-          gridRow: r,
-        ));
+        board.setTile(
+          pos.x.toInt(),
+          pos.y.toInt(),
+          TileModel(
+            tileType: rng.nextInt(board.numTileTypes),
+            gridCol: pos.x.toInt(),
+            gridRow: pos.y.toInt(),
+          ),
+        );
       }
       attempts++;
     }
 
+    _refreshTileComponents();
     _consumeMove();
     _notifyScoreChanged();
     _checkGameOver();
   }
 
-  void activateExtraMoves(int additionalMoves) {
-    movesRemaining += additionalMoves;
-  }
-
+  void activateExtraMoves(int additionalMoves) => movesRemaining += additionalMoves;
   bool isTileSelected(int col, int row) => inputHandler.isSelected(col, row);
   void clearSelection() => inputHandler.clearSelection();
 
-  void reset() {
+void reset() {
     inputHandler.reset();
     cascadeProcessor.reset();
     score = 0;
     coins = 0;
     processing = false;
     _boardEntered = false;
-    // Clean up all tile components
-    for (final child in world.children.whereType<TileComponent>().toList()) {
-      child.removeFromParent();
-    }
+    _onLoadCompleted = false;
+    _clearTileComponents();
   }
+
+  int get currentTargetScore => _targetScore;
 }
